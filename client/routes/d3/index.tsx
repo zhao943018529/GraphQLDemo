@@ -8,6 +8,7 @@ import D3Shape from './D3Shape';
 import BarChart from './BarChart';
 import LineChart from './LineChart';
 import ForceChart from './ForceChart';
+import ForceChart2 from './ForceChart2';
 
 const Div = styled.div``;
 
@@ -24,6 +25,7 @@ export default function palyground() {
             Line Chart
           </ListItemLink>
           <ListItemLink icon={<Drafts />} to={`${path}/force`}></ListItemLink>
+          <ListItemLink icon={<Drafts />} to={`${path}/force2`}></ListItemLink>
         </List>
         <Switch>
           <Route path={path} exact={true}>
@@ -37,6 +39,9 @@ export default function palyground() {
           </Route>
           <Route path={`${path}/force`}>
             <ForceChart />
+          </Route>
+          <Route path={`${path}/force2`}>
+            <ForceChart2 />
           </Route>
         </Switch>
       </BrowserRouter>
