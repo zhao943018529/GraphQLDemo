@@ -9,6 +9,7 @@ import BarChart from './BarChart';
 import LineChart from './LineChart';
 import ForceChart from './ForceChart';
 import ForceChart2 from './ForceChart2';
+import MyChart from './MyChart';
 
 const Div = styled.div``;
 
@@ -26,6 +27,7 @@ export default function palyground() {
           </ListItemLink>
           <ListItemLink icon={<Drafts />} to={`${path}/force`}></ListItemLink>
           <ListItemLink icon={<Drafts />} to={`${path}/force2`}></ListItemLink>
+          <ListItemLink icon={<Drafts />} to={`${path}/mychart`}></ListItemLink>
         </List>
         <Switch>
           <Route path={path} exact={true}>
@@ -42,6 +44,9 @@ export default function palyground() {
           </Route>
           <Route path={`${path}/force2`}>
             <ForceChart2 />
+          </Route>
+          <Route path={`${path}/mychart`}>
+            <MyChart />
           </Route>
         </Switch>
       </BrowserRouter>
