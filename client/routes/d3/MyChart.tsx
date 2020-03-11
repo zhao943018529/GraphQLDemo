@@ -196,8 +196,8 @@ class SpreadChart {
         source: node,
         target: node.parent,
         bundle: {
-          x:node.x+(node.direct==='left'?l1?-l1),
-          y:node.y,
+          x: node.x + (node.direct === 'left' ? l1 : -l1),
+          y: node.y
         }
       };
     });
