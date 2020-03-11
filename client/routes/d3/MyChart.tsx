@@ -88,15 +88,124 @@ function stableSort(a, b) {
   }
 }
 
+interface ILayout {
+  width: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom?: number;
+}
+
+interface ILinkConfig {
+  l1: number;
+  l2: number;
+}
+
+interface IConfig {
+  limit: number;
+  height: number;
+  linkConfig: ILinkConfig;
+}
+
 class SpreadChart {
-  constructor() {}
+  private layout: ILayout;
+  private config: IConfig;
+  private groupWidth: number;
+  private groupHeight: number;
+  private originData: any;
 
-  buildNodes() {}
+  constructor(config: IConfig, layout: ILayout) {
+    this.layout = layout;
+    this.config = config;
+    this.init();
+  }
 
-  buildLinks() {}
+  init() {
+    const layout = this.layout;
+    this.groupWidth =
+      (layout.width - layout.left - layout.right) / this.config.limit;
+    this.groupHeight = this.config.height;
+  }
 
-  build() {
-    return [this.buildNodes()];
+  updateData(data: any) {
+    this.originData = data;
+  }
+
+  getViewBox() {
+    if (!this.originData) {
+      throw Error('execute must after set data');
+    }
+
+    return [
+      -this.layout.left,
+      -this.layout.top,
+      this.layout.width,
+      this.groupHeight * Math.ceil(this.originData.length / this.config.limit)
+    ];
+  }
+
+  buildNodes(dragData) {
+    const nodes = this.originData.map((item, i) => {
+      return {
+        level: 0,
+        data: item,
+        index: i,
+        x: (i % 3) * this.groupWidth + 0.5 * groupWidth,
+        y: Math.floor(i / 3) * this.groupHeight + 0.5 * this.groupHeight
+      };
+    });
+    const found = _.find(topNodes, item => item.data.id === dragData.target.id);
+    if (found) {
+      found.x = dragData.touch.x;
+      found.y = dragData.touch.y;
+    }
+
+    const l1 = this.config.linkConfig.l1;
+    const l2 = this.config.linkConfig.l2;
+
+    const nodes2 = nodes.reduce(node => {
+      const children = node.data.children;
+      const left = Math.ceil(children.length / 2);
+      const right = children.length - left;
+      const angles = [30];
+      let pos = 0;
+      for (let i = 1; i < right; ++i) {
+        angles.push(angles[pos++] + 120 / (right - 1));
+      }
+      angles.push(angles[pos++] + 60);
+      for (let i = 1; i < left; ++i) {
+        angles.push(angles[pos++] + 120 / (left - 1));
+      }
+
+      const nodes2 = angles.map((angle, i) => {
+        return {
+          data: children[i],
+          level: 1,
+          direct: i < right ? 'right' : 'left',
+          x: node.x + (i < right ? 1 : -1) * l2 + l1,
+          y: node.y - Math.tan(((angle * Math.PI) / 180) * l2),
+          parent: node
+        };
+      });
+
+      node.children = nodes2;
+    }, []);
+
+    const links = nodes.map(node => {
+      return {
+        source: node,
+        target: node.parent,
+        bundle: {
+          x:node.x+(node.direct==='left'?l1?-l1),
+          y:node.y,
+        }
+      };
+    });
+  }
+
+  build(data, dragData) {
+    this.originData = data;
+    return [this.buildNodes(dragData)];
   }
 }
 
