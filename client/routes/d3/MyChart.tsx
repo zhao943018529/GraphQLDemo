@@ -97,8 +97,7 @@ interface ILayout {
 }
 
 interface ILinkConfig {
-  l1: number;
-  l2: number;
+  width: number;
 }
 
 interface IConfig {
@@ -169,64 +168,95 @@ class SpreadChart {
       }
     }
 
-    const l1 = this.config.linkConfig.l1;
-    const l2 = this.config.linkConfig.l2;
+    const linkWidth = this.config.linkConfig.width;
 
-    const nodes2 = nodes.reduce((acc, node) => {
-      const children = node.data.children;
-      const left = Math.ceil(children.length / 2);
-      const right = children.length - left;
-      let startAngle = 30;
-      const angles = [];
-      for (let i = 0; i < right; ++i) {
-        angles.push(startAngle);
-        startAngle += 120 / (right - 1);
-      }
+    const nodes2 = nodes
+      .filter(node => node.data.children && node.data.children.length > 0)
+      .reduce((acc, node) => {
+        const children = node.data.children;
+        const angles = [];
+        let n = children.length;
+        let startAngle = 90;
+        const avg = Math.floor(360 / n);
+        do {
+          angles.push(startAngle);
+          startAngle = (startAngle + avg) % 360;
+        } while (--n > 0);
+        // const left = Math.ceil(children.length / 2);
+        // const right = children.length - left;
+        // if (left === 1) {
+        //   startAngle = 270;
+        // } else {
+        //   startAngle = 330;
+        // }
 
-      startAngle = 210;
+        // for (let i = 0; i < left; ++i) {
+        //   angles.push(startAngle);
+        //   startAngle -= 120 / (left - 1);
+        // }
+        // if (left === 1) {
+        //   startAngle = 90;
+        // } else {
+        //   startAngle = 30;
+        // }
+        // for (let i = 0; i < right; ++i) {
+        //   angles.push(startAngle);
+        //   startAngle += 120 / (right - 1);
+        // }
 
-      for (let i = 0; i < left; ++i) {
-        angles.push(startAngle);
-        startAngle += 120 / (left - 1);
-      }
+        const nodes2 = angles.map((angle, i) => {
+          const item = children[i];
+          let current = null;
+          // eslint-disable-next-line eqeqeq
+          if (item._node_ != null) {
+            current = item._node_;
+          } else {
+            current = {
+              id: _.uniqueId('node')
+            };
+          }
+          // let y: number;
+          // if (angle <= 90) {
+          //   y = node.y - Math.tan(((90 - angle) * Math.PI) / 180) * l2;
+          // } else if (angle <= 180) {
+          //   y = node.y + Math.tan(((angle - 90) * Math.PI) / 180) * l2;
+          // } else if (angle <= 270) {
+          //   y = node.y + Math.tan(((270 - angle) * Math.PI) / 180) * l2;
+          // } else {
+          //   y = node.y - Math.tan(((angle - 270) * Math.PI) / 180) * l2;
+          // }
+          const x = Math.floor(
+            node.x + Math.sin((angle * Math.PI) / 180) * linkWidth
+          );
+          const y = Math.floor(
+            node.y - Math.cos((angle * Math.PI) / 180) * linkWidth
+          );
+          // if (angle % 180 <= 90) {
+          //   );
+          // } else {
+          //   y = Math.floor(
+          //     node.y + Math.sin((angle * Math.PI) / 180) * linkWidth
+          //   );
+          //   x = Math.floor(
+          //     node.x - Math.cos((angle * Math.PI) / 180) * linkWidth
+          //   );
+          // }
 
-      const nodes2 = angles.reverse().map((angle, i) => {
-        const item = children[i];
-        let current = null;
-        // eslint-disable-next-line eqeqeq
-        if (item._node_ != null) {
-          current = item._node_;
-        } else {
-          current = {
-            id: _.uniqueId('node')
-          };
-        }
-        let y: number;
-        if (angle <= 90) {
-          y = node.y - Math.tan(((90 - angle) * Math.PI) / 180) * l2;
-        } else if (angle <= 180) {
-          y = node.y + Math.tan(((angle - 90) * Math.PI) / 180) * l2;
-        } else if (angle <= 270) {
-          y = node.y + Math.tan(((270 - angle) * Math.PI) / 180) * l2;
-        } else {
-          y = node.y - Math.tan(((angle - 270) * Math.PI) / 180) * l2;
-        }
+          item._node_ = Object.assign(current, {
+            data: children[i],
+            level: 1,
+            angle: angle,
+            x: x,
+            y: y,
+            parent: node
+          });
 
-        item._node_ = Object.assign(current, {
-          data: children[i],
-          level: 1,
-          direct: i < left ? 'left' : 'right',
-          x: node.x + (i < left ? -1 : 1) * (l1 + l2),
-          y: Math.floor(y),
-          parent: node
+          return current;
         });
 
-        return current;
-      });
-
-      node.children = nodes2;
-      return acc.concat(nodes2);
-    }, []);
+        node.children = nodes2;
+        return acc.concat(nodes2);
+      }, []);
 
     const links = nodes2.map(node => {
       let current = null;
@@ -239,11 +269,7 @@ class SpreadChart {
       }
       node._link_ = Object.assign(current, {
         source: node,
-        target: node.parent,
-        bundle: {
-          x: node.x + (node.direct === 'left' ? l1 : -l1),
-          y: node.y
-        }
+        target: node.parent
       });
 
       return current;
@@ -323,8 +349,7 @@ export default function() {
             limit: 3,
             height: 360,
             linkConfig: {
-              l1: 20,
-              l2: 80
+              width: 120
             }
           },
           {
@@ -342,12 +367,12 @@ export default function() {
             winSize,
             Math.ceil(chartData.length / 3) * 360 + layout.top
           ]);
+        linksContainer = root.append('g').attr('class', 'links');
         nodesContainer = root
           .append('g')
           .attr('class', 'nodes')
-          .attr('font-family', 'sans-serif')
+          .attr('font-family', 'monospace')
           .attr('font-size', 16);
-        linksContainer = root.append('g').attr('class', 'links');
       } else {
         root = rootRef.current;
         nodesContainer = root.select('g.nodes');
@@ -423,12 +448,12 @@ export default function() {
               .attr('stroke', '#333333'),
           update =>
             update.transition(transition).attr('d', d => {
-              return `M${d.source.x},${d.source.y} L${d.bundle.x},${d.bundle.y} L${d.target.x},${d.target.y}`;
+              return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
             })
         )
         .transition(transition)
         .attr('d', d => {
-          return `M${d.source.x},${d.source.y} L${d.bundle.x},${d.bundle.y} L${d.target.x},${d.target.y}`;
+          return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
         });
       const nodeList = nodesContainer
         .selectAll('g.node')
@@ -483,14 +508,33 @@ export default function() {
               .attr('fill', 'none')
               .attr('stroke', '#F79A07')
               .attr('points', d => {
-                const width = 16 * (d.data.name.length + 2);
-                if (d.direct === 'right') {
-                  return `0,-10 10,-20 ${width},-20 ${width},10 ${width -
-                    10},20 0,20`;
+                const width = 16 * (d.data.name.length + 1);
+                const height = 40;
+                const skewWidth = 10;
+                if (d.angle < 90) {
+                  return `0,0 0,${-height +
+                    skewWidth} ${skewWidth},${-height} ${width},${-height} ${width},${-skewWidth} ${width -
+                    skewWidth},0`;
+                } else if (d.angle < 180) {
+                  return `0,0 ${width -
+                    skewWidth},0 ${width},${skewWidth} ${width},${height} ${skewWidth},${height} 0,${height -
+                    skewWidth}`;
+                } else if (d.angle < 270) {
+                  return `0,0 ${-width +
+                    skewWidth},0 ${-width},${skewWidth} ${-width},${height} ${-skewWidth},${height} 0,${height -
+                    skewWidth}`;
                 } else {
-                  return `0,-10 -10,-20 ${-width},-20 ${-width},10 ${-width +
-                    10},20 0,20`;
+                  return `0,0 0,${-height +
+                    skewWidth} ${-skewWidth},${-height} ${-width},${-height} ${-width},${-skewWidth} ${-width +
+                    skewWidth},0`;
                 }
+                // if (d.direct === 'right') {
+                //   return `0,-10 10,-20 ${width},-20 ${width},10 ${width -
+                //     10},20 0,20`;
+                // } else {
+                //   return `0,-10 -10,-20 ${-width},-20 ${-width},10 ${-width +
+                //     10},20 0,20`;
+                // }
               });
             enterG
               .append('polygon')
@@ -499,29 +543,59 @@ export default function() {
                 const space = 4;
                 const height = 32;
                 const fontSize = 16;
-                const skewWidth = height / 2;
-                const width = fontSize * (d.data.name.length + 2) - space * 2;
-                if (d.direct === 'right') {
-                  return `${space},${-skewWidth} ${space +
-                    skewWidth},${-height / 2} ${width + space},${-height /
-                    2} ${width + space},${skewWidth} ${width +
+                const skewWidth = height / 4;
+                const width = fontSize * (d.data.name.length + 1) - space * 2;
+                if (d.angle < 90) {
+                  return `${space},${-space} ${space},${-height -
+                    space +
+                    skewWidth} ${skewWidth + space},${-height - space} ${width +
+                    space},${-height - space} ${width + space},${-skewWidth -
+                    space} ${width - skewWidth + space},${-space} `;
+                } else if (d.angle < 180) {
+                  return `${space},${space} ${width -
+                    skewWidth +
+                    space},${space} ${width + space},${skewWidth +
+                    space} ${width + space},${height + space} ${skewWidth +
+                    space},${height + space} ${space},${height -
+                    skewWidth +
+                    space}`;
+                } else if (d.angle < 270) {
+                  return `${-space},${space} ${-space},${height +
                     space -
-                    skewWidth},${height / 2} ${space},${height / 2}`;
+                    skewWidth} ${-skewWidth - space},${height +
+                    space} ${-space - width},${height + space} ${-width -
+                    space},${skewWidth + space} ${-width -
+                    space +
+                    skewWidth},${space}`;
                 } else {
-                  return `${-space},${-skewWidth} ${-space -
-                    skewWidth},${-height / 2} ${-space - width},${-height /
-                    2} ${-width - space},${skewWidth} ${-space -
-                    width +
-                    skewWidth},${height / 2} ${-space},${height /
-                    2} ${-space},${-skewWidth}`;
+                  return `${-space},${-space} ${-space},${-height +
+                    skewWidth -
+                    space} ${-skewWidth - space},${-height - space} ${-width -
+                    space},${-height - space} ${-width - space},${-skewWidth -
+                    space} ${-width + skewWidth - space},${-space}`;
                 }
+                // if (d.direct === 'right') {
+                //   return `${space},${-skewWidth} ${space +
+                //     skewWidth},${-height / 2} ${width + space},${-height /
+                //     2} ${width + space},${skewWidth} ${width +
+                //     space -
+                //     skewWidth},${height / 2} ${space},${height / 2}`;
+                // } else {
+                //   return `${-space},${-skewWidth} ${-space -
+                //     skewWidth},${-height / 2} ${-space - width},${-height /
+                //     2} ${-width - space},${skewWidth} ${-space -
+                //     width +
+                //     skewWidth},${height / 2} ${-space},${height /
+                //     2} ${-space},${-skewWidth}`;
+                // }
               });
             enterG
               .append('text')
-              .attr('text-anchor', d => (d.direct === 'left' ? 'end' : 'start'))
-              .attr('dy', '0.40em')
-              .attr('dx', d => (d.direct === 'left' ? '-1em' : '1em'))
-              .attr('stroke', '#FFF')
+              .attr('text-anchor', d => (d.angle >= 180 ? 'end' : 'start'))
+              .attr('dy', d => (d.angle < 90 || d.angle >= 270 ? -16 : 16))
+              .attr('dx', d => (d.angle >= 180 ? '-1em' : '1em'))
+              // .attr('stroke', '#FFFFFF')
+              .attr('fill', '#FFFFFF')
               .text(d => d.data.name);
 
             return enterG;
