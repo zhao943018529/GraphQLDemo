@@ -114,24 +114,20 @@ class SpreadChart {
   private groupHeight: number;
   private originData: any;
 
-  constructor(config: IConfig, layout: ILayout) {
+  public constructor(config: IConfig, layout: ILayout) {
     this.layout = layout;
     this.config = config;
     this.init();
   }
 
-  init() {
+  private init() {
     const layout = this.layout;
     this.groupWidth =
       (layout.width - layout.left - layout.right) / this.config.limit;
     this.groupHeight = this.config.height;
   }
 
-  updateData(data: any) {
-    this.originData = data;
-  }
-
-  getViewBox() {
+  public getViewBox() {
     if (!this.originData) {
       throw Error('execute must after set data');
     }
@@ -144,79 +140,138 @@ class SpreadChart {
     ];
   }
 
-  buildNodes(dragData) {
+  private buildNodes(dragData?: any) {
     const nodes = this.originData.map((item, i) => {
-      return {
-        level: 0,
-        data: item,
+      let current = null;
+      if (item._node_) {
+        current = item._node_;
+      } else {
+        current = {
+          id: item.id,
+          level: 0,
+          data: item
+        };
+      }
+
+      item._node_ = Object.assign(current, {
         index: i,
-        x: (i % 3) * this.groupWidth + 0.5 * groupWidth,
+        x: (i % 3) * this.groupWidth + 0.5 * this.groupWidth,
         y: Math.floor(i / 3) * this.groupHeight + 0.5 * this.groupHeight
-      };
+      });
+
+      return current;
     });
-    const found = _.find(topNodes, item => item.data.id === dragData.target.id);
-    if (found) {
-      found.x = dragData.touch.x;
-      found.y = dragData.touch.y;
+    if (dragData) {
+      const found = _.find(nodes, item => item.id === dragData.target.id);
+      if (found) {
+        found.x = dragData.touch.x;
+        found.y = dragData.touch.y;
+      }
     }
 
     const l1 = this.config.linkConfig.l1;
     const l2 = this.config.linkConfig.l2;
 
-    const nodes2 = nodes.reduce(node => {
+    const nodes2 = nodes.reduce((acc, node) => {
       const children = node.data.children;
       const left = Math.ceil(children.length / 2);
       const right = children.length - left;
-      const angles = [30];
-      let pos = 0;
-      for (let i = 1; i < right; ++i) {
-        angles.push(angles[pos++] + 120 / (right - 1));
-      }
-      angles.push(angles[pos++] + 60);
-      for (let i = 1; i < left; ++i) {
-        angles.push(angles[pos++] + 120 / (left - 1));
+      let startAngle = 30;
+      const angles = [];
+      for (let i = 0; i < right; ++i) {
+        angles.push(startAngle);
+        startAngle += 120 / (right - 1);
       }
 
-      const nodes2 = angles.map((angle, i) => {
-        return {
+      startAngle = 210;
+
+      for (let i = 0; i < left; ++i) {
+        angles.push(startAngle);
+        startAngle += 120 / (left - 1);
+      }
+
+      const nodes2 = angles.reverse().map((angle, i) => {
+        const item = children[i];
+        let current = null;
+        // eslint-disable-next-line eqeqeq
+        if (item._node_ != null) {
+          current = item._node_;
+        } else {
+          current = {
+            id: _.uniqueId('node')
+          };
+        }
+        let y: number;
+        if (angle <= 90) {
+          y = node.y - Math.tan(((90 - angle) * Math.PI) / 180) * l2;
+        } else if (angle <= 180) {
+          y = node.y + Math.tan(((angle - 90) * Math.PI) / 180) * l2;
+        } else if (angle <= 270) {
+          y = node.y + Math.tan(((270 - angle) * Math.PI) / 180) * l2;
+        } else {
+          y = node.y - Math.tan(((angle - 270) * Math.PI) / 180) * l2;
+        }
+
+        item._node_ = Object.assign(current, {
           data: children[i],
           level: 1,
-          direct: i < right ? 'right' : 'left',
-          x: node.x + (i < right ? 1 : -1) * l2 + l1,
-          y: node.y - Math.tan(((angle * Math.PI) / 180) * l2),
+          direct: i < left ? 'left' : 'right',
+          x: node.x + (i < left ? -1 : 1) * (l1 + l2),
+          y: Math.floor(y),
           parent: node
-        };
+        });
+
+        return current;
       });
 
       node.children = nodes2;
+      return acc.concat(nodes2);
     }, []);
 
-    const links = nodes.map(node => {
-      return {
+    const links = nodes2.map(node => {
+      let current = null;
+      if (node._link_) {
+        current = node._link_;
+      } else {
+        current = {
+          id: _.uniqueId('link')
+        };
+      }
+      node._link_ = Object.assign(current, {
         source: node,
         target: node.parent,
         bundle: {
           x: node.x + (node.direct === 'left' ? l1 : -l1),
           y: node.y
         }
-      };
+      });
+
+      return current;
     });
+
+    this.nodes = nodes.concat(nodes2);
+    this.links = links;
+
+    return [this.nodes, this.links];
   }
 
-  build(data, dragData) {
+  public build(data: any, dragData: any) {
     this.originData = data;
-    return [this.buildNodes(dragData)];
+
+    return this.buildNodes(dragData);
   }
 }
 
-mockData.forEach((a, i) => (a.rank = i));
+// mockData.forEach((a, i) => (a.rank = i));
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 // eslint-disable-next-line react/display-name
 export default function() {
   const rootRef = useRef(null);
+  const toolRef = useRef<SpreadChart>(null);
   const [chartData, setChartData] = useState(mockData);
   const [winSize, setWinSize] = useState(-1);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragData, setDragData] = useState(null);
   const refDiv = useRef<HTMLDivElement>(null);
   const [settingConfig, setSetttingConfig] = useState({
     treeHeight: 360,
@@ -234,7 +289,7 @@ export default function() {
     // 转换每个节点对应坐标 每行显示三个
     data.forEach((item, i) => {
       const x = (i % 3) * width + 0.5 * width;
-      const y = Math.floor(i / 3) * height + 0.5 * height;
+      const y = Math.floor((i / 3) * height + 0.5 * height);
       item.x = x;
       item.y = y;
     });
@@ -261,7 +316,24 @@ export default function() {
 
       let root = null;
       let nodesContainer = null;
+      let linksContainer = null;
       if (rootRef.current == null) {
+        toolRef.current = new SpreadChart(
+          {
+            limit: 3,
+            height: 360,
+            linkConfig: {
+              l1: 20,
+              l2: 80
+            }
+          },
+          {
+            width: winSize,
+            left: 100,
+            top: 100,
+            right: 100
+          }
+        );
         root = d3
           .select('svg.myChart')
           .attr('viewBox', [
@@ -270,15 +342,22 @@ export default function() {
             winSize,
             Math.ceil(chartData.length / 3) * 360 + layout.top
           ]);
-        nodesContainer = root.append('g').attr('class', 'nodes');
+        nodesContainer = root
+          .append('g')
+          .attr('class', 'nodes')
+          .attr('font-family', 'sans-serif')
+          .attr('font-size', 16);
+        linksContainer = root.append('g').attr('class', 'links');
       } else {
         root = rootRef.current;
         nodesContainer = root.select('g.nodes');
+        linksContainer = root.select('g.links');
       }
 
-      if (!isDragging) {
-        transformData(chartData, treeWidth, settingConfig.treeHeight);
-      }
+      const [nodes, links] = toolRef.current.build(chartData, dragData);
+      //   if (!isDragging) {
+      //     transformData(chartData, treeWidth, settingConfig.treeHeight);
+      //   }
 
       //   function normalizeX(x) {
       //     return (Math.floor(x / treeWidth) + 0.5) * treeWidth;
@@ -294,27 +373,30 @@ export default function() {
       function dragging(d) {
         const x = d3.event.x;
         const y = d3.event.y;
-        const newData = _.cloneDeep(chartData);
-        const target = _.find(newData, { id: d.id });
+        const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+        const target = _.find(topNodes, { id: d.id });
         target.x = x;
         target.y = normalizeY(y);
-        newData.sort(stableSort);
-        transformData(newData, treeWidth, settingConfig.treeHeight);
-        target.y = y;
-        target.x = x;
-        setIsDragging(true);
+        topNodes.sort(stableSort);
+        const newData = topNodes.map(node => node.data);
+        // transformData(newData, treeWidth, settingConfig.treeHeight);
+        // target.y = y;
+        // target.x = x;
+        // setIsDragging(true);
         setChartData(newData);
+        setDragData({ target: d, touch: { x, y } });
       }
 
       function dragend(d) {
         const x = d3.event.x;
         const y = d3.event.y;
-        const newData = _.cloneDeep(chartData);
-        const target = _.find(newData, { id: d.id });
+        const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+        const target = _.find(topNodes, { id: d.id });
         target.x = x;
         target.y = normalizeY(y);
-        newData.sort(stableSort);
-        setIsDragging(false);
+        topNodes.sort(stableSort);
+        const newData = topNodes.map(node => node.data);
+        setDragData(null);
         setChartData(newData);
       }
 
@@ -329,15 +411,37 @@ export default function() {
         .ease(d3.easeLinear);
 
       rootRef.current = root;
-
+      linksContainer
+        .selectAll('path.link')
+        .data(links, d => d.id)
+        .join(
+          enter =>
+            enter
+              .append('path')
+              .attr('class', 'link')
+              .attr('fill', 'none')
+              .attr('stroke', '#333333'),
+          update =>
+            update.transition(transition).attr('d', d => {
+              return `M${d.source.x},${d.source.y} L${d.bundle.x},${d.bundle.y} L${d.target.x},${d.target.y}`;
+            })
+        )
+        .transition(transition)
+        .attr('d', d => {
+          return `M${d.source.x},${d.source.y} L${d.bundle.x},${d.bundle.y} L${d.target.x},${d.target.y}`;
+        });
       const nodeList = nodesContainer
-        .selectAll('g')
-        .data(chartData, d => d.id)
+        .selectAll('g.node')
+        .data(
+          nodes.filter(item => item.level === 0),
+          d => d.id
+        )
         .order()
         .join(
           enter => {
             const enterG = enter
               .append('g')
+              .attr('class', 'node')
               .attr('transform', 'translate(0,0)');
             enterG
               .append('circle')
@@ -362,6 +466,68 @@ export default function() {
               .attr('transform', d => `translate(${d.x},${d.y})`)
         )
         .call(drag)
+        .transition(transition)
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+
+      nodesContainer
+        .selectAll('g.child')
+        .data(
+          nodes.filter(item => item.level === 1),
+          d => d.id
+        )
+        .join(
+          enter => {
+            const enterG = enter.append('g').attr('class', 'child');
+            enterG
+              .append('polygon')
+              .attr('fill', 'none')
+              .attr('stroke', '#F79A07')
+              .attr('points', d => {
+                const width = 16 * (d.data.name.length + 2);
+                if (d.direct === 'right') {
+                  return `0,-10 10,-20 ${width},-20 ${width},10 ${width -
+                    10},20 0,20`;
+                } else {
+                  return `0,-10 -10,-20 ${-width},-20 ${-width},10 ${-width +
+                    10},20 0,20`;
+                }
+              });
+            enterG
+              .append('polygon')
+              .attr('fill', '#6b460d')
+              .attr('points', d => {
+                const space = 4;
+                const height = 32;
+                const fontSize = 16;
+                const skewWidth = height / 2;
+                const width = fontSize * (d.data.name.length + 2) - space * 2;
+                if (d.direct === 'right') {
+                  return `${space},${-skewWidth} ${space +
+                    skewWidth},${-height / 2} ${width + space},${-height /
+                    2} ${width + space},${skewWidth} ${width +
+                    space -
+                    skewWidth},${height / 2} ${space},${height / 2}`;
+                } else {
+                  return `${-space},${-skewWidth} ${-space -
+                    skewWidth},${-height / 2} ${-space - width},${-height /
+                    2} ${-width - space},${skewWidth} ${-space -
+                    width +
+                    skewWidth},${height / 2} ${-space},${height /
+                    2} ${-space},${-skewWidth}`;
+                }
+              });
+            enterG
+              .append('text')
+              .attr('text-anchor', d => (d.direct === 'left' ? 'end' : 'start'))
+              .attr('dy', '0.40em')
+              .attr('dx', d => (d.direct === 'left' ? '-1em' : '1em'))
+              .attr('stroke', '#FFF')
+              .text(d => d.data.name);
+
+            return enterG;
+          },
+          update => update
+        )
         .transition(transition)
         .attr('transform', d => `translate(${d.x},${d.y})`);
     }

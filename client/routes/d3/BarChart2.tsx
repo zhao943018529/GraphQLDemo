@@ -6,26 +6,41 @@ const { useEffect, useState, useRef } = React;
 
 export default function BarChart() {
   const [chartData, setChartData] = useState([
-    { name: 'Coca-Cola', value: 72537, rank: 0 },
-    { name: 'Microsoft', value: 70196, rank: 1 },
-    { name: 'IBM', value: 53183, rank: 2 },
-    { name: 'Intel', value: 39048, rank: 3 },
-    { name: 'Nokia', value: 38528, rank: 4 },
-    { name: 'GE', value: 38127, rank: 5 },
-    { name: 'Ford', value: 36368, rank: 6 },
-    { name: 'Disney', value: 33553, rank: 7 },
-    { name: 'McDonald', value: 27859, rank: 8 },
-    { name: 'AT&T', value: 25548, rank: 9 },
-    { name: 'Marlboro', value: 22110, rank: 10 },
-    { name: 'Mercedes-Benz', value: 21104, rank: 11 },
-    { name: 'HP', value: 20572, rank: 12 },
-    { name: 'Cisco', value: 20067, rank: 12 },
-    { name: 'Toyota', value: 18823, rank: 12 },
-    { name: 'Citi', value: 18809, rank: 12 },
-    { name: 'Gillette', value: 17358, rank: 12 },
-    { name: 'Sony', value: 16409, rank: 12 },
-    { name: 'American Express', value: 16122, rank: 12 },
-    { name: 'Honda', value: 15244, rank: 12 }
+    {
+      name: 'CA',
+      apple: 120,
+      banana: 340
+    },
+    {
+      name: 'CF',
+      apple: 777,
+      banana: 223
+    },
+    {
+      name: 'BN',
+      apple: 124,
+      banana: 354
+    },
+    {
+      name: 'KA',
+      apple: 236,
+      banana: 178
+    },
+    {
+      name: 'FG',
+      apple: 427,
+      banana: 298
+    },
+    {
+      name: 'TJ',
+      apple: 742,
+      banana: 683
+    },
+    {
+      name: 'MMA',
+      apple: 539,
+      banana: 275
+    }
   ]);
 
   // const [step, setStep] = useState(0);
@@ -42,15 +57,18 @@ export default function BarChart() {
   const rootRef = useRef(null);
   const xRef = useRef(null);
   const yRef = useRef(null);
-  const axisXRef = useRef(null);
-  const axisYRef = useRef(null);
   const colorRef = useRef(null);
   const timeRef = useRef(null);
   const stepRef = useRef(0);
 
   useEffect(() => {
+    const series = d3
+      .stack()
+      .keys(['apple', 'banana'])(chartData)
+      .map(d => (d.forEach(v => (v.key = d.key)), d));
     let group = null;
     if (rootRef.current == null) {
+      //init
       rootRef.current = d3
         .select('svg.barChart')
         .attr('viewBox', [0, 0, layout.width, layout.height] as any);
@@ -61,21 +79,16 @@ export default function BarChart() {
 
       yRef.current = d3
         .scaleLinear()
-        .domain([0, d3.max(chartData, item => item.value)])
+        .domain([0, d3.max(series, d => d3.max(d, d => d[1]))])
         .range([layout.height - layout.bottom, layout.top]);
 
       colorRef.current = d3.scaleOrdinal(['M', 'F'], ['#4e79a7', '#e15759']);
 
-      axisXRef.current = d3
-        .axisBottom(xRef.current)
-        .ticks(20)
-        .tickSizeOuter(0);
-      axisYRef.current = d3.axisLeft(yRef.current).ticks(10);
       group = rootRef.current.append('g').attr('class', 'container');
     } else {
       group = rootRef.current.select('g.container');
       xRef.current.domain(chartData.map(item => item.name));
-      yRef.current.domain([0, d3.max(chartData, item => item.value)]);
+      yRef.current.domain([0, d3.max(series, d => d3.max(d, d => d[1]))]);
     }
     const root = rootRef.current;
     const x = xRef.current;
@@ -85,38 +98,51 @@ export default function BarChart() {
       .duration(500)
       .ease(d3.easeLinear);
     const dx = x.step() * stepRef.current;
-    group
+    const stack = group
+      .selectAll('g.stack')
+      .data(series, (d, i) => i)
+      .join(
+        enter => enter.append('g').attr('class', 'stack'),
+        update => update
+      );
+    stack
       .selectAll('rect')
-      .data(chartData, d => d.name)
+      .data(
+        d => d,
+        d => d.data.name
+      )
       .join(
         enter =>
           enter
             .append('rect')
-            .attr('fill', d => colorRef.current(d.name))
-            .attr('x', d => x(d.name) + dx)
+            .attr('fill', d => colorRef.current(d.key))
+            .attr('x', d => {
+              // debugger;
+              return x(d.data.name) + dx;
+            })
             .attr('width', x.bandwidth())
             .attr('y', y(0)),
-        update => update.attr('x', d => x(d.name) + dx),
+        update => update.attr('x', d => x(d.data.name) + dx),
         exist =>
           exist
             .transition(transition)
             .remove()
-            .attr('x', -x.bandwidth())
-            .attr('y', y(0))
+            .attr('y', d => y(0))
             .attr('height', 0)
       )
       .transition(transition)
-      .attr('y', d => y(d.value))
-      .attr('height', d => y(0) - y(d.value));
+      .attr('y', d => y(d[1]))
+      .attr('height', d => y(d[0]) - y(d[1]));
 
     group.transition(transition).attr('transform', `translate(${-dx},0)`);
     timeRef.current = setTimeout(() => {
       const newChart = chartData.slice(1);
-      newChart.push({
+      const newItem = {
         name: _.uniqueId('myd3'),
-        value: 1000 + Math.random() * 5000,
-        rank: 1
-      });
+        apple: 100 + Math.floor(Math.random() * 200),
+        banana: 100 + Math.floor(Math.random() * 300)
+      };
+      newChart.push(newItem);
       ++stepRef.current;
       setChartData(newChart);
     }, 1000);
@@ -130,7 +156,7 @@ export default function BarChart() {
   return (
     <div>
       <h1>LLL</h1>
-      <div>
+      <div style={{ width: 600, height: 400 }}>
         <svg className="barChart"></svg>
       </div>
     </div>
