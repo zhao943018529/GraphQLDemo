@@ -1,12 +1,31 @@
 import * as React from 'react';
 import styled from 'styled-components';
+import { Close } from '@material-ui/icons';
+import IconButton from '@material-ui/core/IconButton';
 import * as d3 from 'd3';
 import * as _ from 'lodash';
 const { useEffect, useState, useMemo, useRef } = React;
 
 const DivContainer = styled.div`
-  padding: 50px 40px;
   background: #f5f5f5;
+  position: relative;
+`;
+
+const WrapperIconButton = styled(IconButton)`
+  position: absolute;
+  left: 0;
+  top: 0;
+`;
+
+const DetailContainer = styled.div<{ hide: boolean }>`
+  right: 0;
+  bottom: 0;
+  width: ${props => (props.hide ? '0px' : '600px')};
+  height: ${props => (props.hide ? '0px' : '400px')};
+  background: blue;
+  position: absolute;
+  transition: all 0.25s ease-in-out;
+  overflow: hidden;
 `;
 
 const mockData = [
@@ -72,6 +91,20 @@ const mockData = [
   }
 ];
 
+function generateData() {
+  const size = Math.floor(4 + Math.random() * 7);
+  const children = _.range(size).map(() => ({
+    id: _.uniqueId('aaaa'),
+    name: _.uniqueId('bbbbbb')
+  }));
+  return {
+    id: _.uniqueId('toptop'),
+    name: _.uniqueId('jqka'),
+    color: '#FF2424',
+    children: children
+  };
+}
+
 function stableSort(a, b) {
   if (a.y > b.y) {
     return 1;
@@ -109,13 +142,13 @@ interface IConfig {
 class SpreadChart {
   private layout: ILayout;
   private config: IConfig;
-  private groupWidth: number;
-  private groupHeight: number;
+  public groupWidth: number;
+  public groupHeight: number;
   private originData: any;
 
   public constructor(config: IConfig, layout: ILayout) {
-    this.layout = layout;
-    this.config = config;
+    this.layout = Object.assign({}, layout);
+    this.config = Object.assign({}, config);
     this.init();
   }
 
@@ -124,6 +157,18 @@ class SpreadChart {
     this.groupWidth =
       (layout.width - layout.left - layout.right) / this.config.limit;
     this.groupHeight = this.config.height;
+  }
+
+  public updateWidth(width: number) {
+    this.layout.width = width;
+    this.init();
+  }
+
+  public getPositionByIndex(i: number) {
+    return {
+      x: (i % 3) * this.groupWidth + 0.5 * this.groupWidth,
+      y: Math.floor(i / 3) * this.groupHeight + 0.5 * this.groupHeight
+    };
   }
 
   public getViewBox() {
@@ -135,7 +180,12 @@ class SpreadChart {
       -this.layout.left,
       -this.layout.top,
       this.layout.width,
-      this.groupHeight * Math.ceil(this.originData.length / this.config.limit)
+      Math.max(
+        this.groupHeight *
+          Math.ceil(this.originData.length / this.config.limit) +
+          this.layout.top,
+        600
+      )
     ];
   }
 
@@ -248,7 +298,8 @@ class SpreadChart {
             angle: angle,
             x: x,
             y: y,
-            parent: node
+            parent: node,
+            index: i
           });
 
           return current;
@@ -269,7 +320,8 @@ class SpreadChart {
       }
       node._link_ = Object.assign(current, {
         source: node,
-        target: node.parent
+        target: node.parent,
+        index: node.index
       });
 
       return current;
@@ -294,11 +346,14 @@ class SpreadChart {
 export default function() {
   const rootRef = useRef(null);
   const toolRef = useRef<SpreadChart>(null);
+  const detailRef = useRef(null);
   const [chartData, setChartData] = useState(mockData);
+  const [id, setId] = useState(null);
   const [winSize, setWinSize] = useState(-1);
   const [isDragging, setIsDragging] = useState(false);
   const [dragData, setDragData] = useState(null);
   const refDiv = useRef<HTMLDivElement>(null);
+  const groupRef = useRef(null);
   const [settingConfig, setSetttingConfig] = useState({
     treeHeight: 360,
     circle: 10,
@@ -310,6 +365,50 @@ export default function() {
       right: 120
     }
   });
+
+  function normalizeY(y) {
+    return (
+      (Math.floor(y / toolRef.current.groupHeight) + 0.5) *
+      toolRef.current.groupHeight
+    );
+  }
+
+  function handleDragStart(evt: React.DragEvent<HTMLElement>) {
+    evt.dataTransfer.effectAllowed = 'move';
+    evt.dataTransfer.setData('Text', JSON.stringify(generateData()));
+    return true;
+  }
+
+  function handleDragEnter(evt: React.DragEvent<HTMLElement>) {
+    evt.preventDefault();
+    return true;
+  }
+
+  function handleDragOver(evt: React.DragEvent<HTMLElement>) {
+    evt.preventDefault();
+    return false;
+  }
+
+  function handleDrop(evt: React.DragEvent<HTMLElement>) {
+    const dataStr = evt.dataTransfer.getData('Text');
+    const item = JSON.parse(dataStr);
+    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+    const rect = evt.target.getBoundingClientRect();
+    const temp = {
+      x: evt.clientX - rect.left,
+      y: normalizeY(evt.clientY - rect.top),
+      data: item
+    };
+    topNodes.push(temp);
+    topNodes.sort(stableSort);
+    const newData = topNodes.map(item => item.data);
+    if (newData.length > 6) {
+      newData.pop();
+    }
+    setChartData(newData);
+    evt.stopPropagation();
+    return false;
+  }
 
   function transformData(data, width: number, height: number) {
     // 转换每个节点对应坐标 每行显示三个
@@ -323,11 +422,34 @@ export default function() {
     return data;
   }
 
-  function normalizeY(y) {
-    return (
-      (Math.floor(y / settingConfig.treeHeight) + 0.5) *
-      settingConfig.treeHeight
-    );
+  function dragging(d) {
+    const x = d3.event.x;
+    const y = d3.event.y;
+    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+    const target = _.find(topNodes, { id: d.id });
+    target.x = x;
+    target.y = normalizeY(y);
+    topNodes.sort(stableSort);
+    const newData = topNodes.map(node => node.data);
+    // transformData(newData, treeWidth, settingConfig.treeHeight);
+    // target.y = y;
+    // target.x = x;
+    // setIsDragging(true);
+    setChartData(newData);
+    setDragData({ target: d, touch: { x, y } });
+  }
+
+  function dragend(d) {
+    const x = d3.event.x;
+    const y = d3.event.y;
+    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+    const target = _.find(topNodes, { id: d.id });
+    target.x = x;
+    target.y = normalizeY(y);
+    topNodes.sort(stableSort);
+    const newData = topNodes.map(node => node.data);
+    setDragData(null);
+    setChartData(newData);
   }
 
   useEffect(() => {
@@ -336,50 +458,63 @@ export default function() {
 
   useEffect(() => {
     if (winSize > 0) {
-      const layout = settingConfig.layout;
-      const remainWidth = winSize - layout.left - layout.right;
-      const treeWidth = Math.floor(remainWidth / 3);
-
       let root = null;
       let nodesContainer = null;
       let linksContainer = null;
-      if (rootRef.current == null) {
+      if (toolRef.current === null) {
         toolRef.current = new SpreadChart(
           {
             limit: 3,
-            height: 360,
+            height: 400,
             linkConfig: {
-              width: 120
+              width: 140
             }
           },
           {
             width: winSize,
-            left: 100,
+            left: 40,
             top: 100,
-            right: 100
+            right: 40
           }
         );
-        root = d3
-          .select('svg.myChart')
-          .attr('viewBox', [
-            -layout.left,
-            -layout.top,
-            winSize,
-            Math.ceil(chartData.length / 3) * 360 + layout.top
-          ]);
-        linksContainer = root.append('g').attr('class', 'links');
-        nodesContainer = root
+      }
+      let renderData = null;
+      if (id !== null) {
+        renderData = chartData.filter(item => item.id === id);
+      } else {
+        renderData = chartData;
+      }
+      const [nodes, links] = toolRef.current.build(renderData, dragData);
+      const viewBox = toolRef.current.getViewBox();
+      if (rootRef.current == null) {
+        root = d3.select('svg.myChart');
+        groupRef.current = root.append('g').attr('class', 'group');
+        linksContainer = groupRef.current.append('g').attr('class', 'links');
+        nodesContainer = groupRef.current
           .append('g')
           .attr('class', 'nodes')
           .attr('font-family', 'monospace')
           .attr('font-size', 16);
       } else {
         root = rootRef.current;
+        if (id !== null) {
+        }
         nodesContainer = root.select('g.nodes');
         linksContainer = root.select('g.links');
       }
-
-      const [nodes, links] = toolRef.current.build(chartData, dragData);
+      root.attr('viewBox', viewBox);
+      if (id !== null) {
+        const rect = toolRef.current.getPositionByIndex(0);
+        const scale = 1.4;
+        const x = (viewBox[2] / 2 + viewBox[0] - rect.x) / scale;
+        const y = (viewBox[3] / 2 + viewBox[1] - rect.y) / scale;
+        groupRef.current.attr(
+          'transform',
+          `translate(${x},${y}) scale(${scale})`
+        );
+      } else {
+        groupRef.current.attr('transform', 'translate(0,0) scale(1)');
+      }
       //   if (!isDragging) {
       //     transformData(chartData, treeWidth, settingConfig.treeHeight);
       //   }
@@ -394,36 +529,6 @@ export default function() {
       //       settingConfig.treeHeight
       //     );
       //   }
-
-      function dragging(d) {
-        const x = d3.event.x;
-        const y = d3.event.y;
-        const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
-        const target = _.find(topNodes, { id: d.id });
-        target.x = x;
-        target.y = normalizeY(y);
-        topNodes.sort(stableSort);
-        const newData = topNodes.map(node => node.data);
-        // transformData(newData, treeWidth, settingConfig.treeHeight);
-        // target.y = y;
-        // target.x = x;
-        // setIsDragging(true);
-        setChartData(newData);
-        setDragData({ target: d, touch: { x, y } });
-      }
-
-      function dragend(d) {
-        const x = d3.event.x;
-        const y = d3.event.y;
-        const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
-        const target = _.find(topNodes, { id: d.id });
-        target.x = x;
-        target.y = normalizeY(y);
-        topNodes.sort(stableSort);
-        const newData = topNodes.map(node => node.data);
-        setDragData(null);
-        setChartData(newData);
-      }
 
       const drag = d3
         .drag()
@@ -440,21 +545,29 @@ export default function() {
         .selectAll('path.link')
         .data(links, d => d.id)
         .join(
-          enter =>
-            enter
+          enter => {
+            const enterG = enter
               .append('path')
               .attr('class', 'link')
               .attr('fill', 'none')
-              .attr('stroke', '#333333'),
+              .attr('stroke', 'transparent')
+              .attr(
+                'd',
+                d =>
+                  `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y} `
+              );
+            enterG
+              .transition(transition)
+              .delay(d => d.index * 250)
+              .attr('stroke', '#F79A07');
+
+            return enterG;
+          },
           update =>
             update.transition(transition).attr('d', d => {
               return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
             })
-        )
-        .transition(transition)
-        .attr('d', d => {
-          return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
-        });
+        );
       const nodeList = nodesContainer
         .selectAll('g.node')
         .data(
@@ -473,7 +586,7 @@ export default function() {
               .attr('cx', 0)
               .attr('cy', 0)
               .attr('r', 18)
-              .attr('fill', d => d.color);
+              .attr('fill', d => d.data.color);
             enterG
               .append('use')
               .attr('x', -15)
@@ -491,6 +604,9 @@ export default function() {
               .attr('transform', d => `translate(${d.x},${d.y})`)
         )
         .call(drag)
+        .on('dblclick', d => {
+          setId(d.data.id);
+        })
         .transition(transition)
         .attr('transform', d => `translate(${d.x},${d.y})`);
 
@@ -592,25 +708,41 @@ export default function() {
             enterG
               .append('text')
               .attr('text-anchor', d => (d.angle >= 180 ? 'end' : 'start'))
-              .attr('dy', d => (d.angle < 90 || d.angle >= 270 ? -16 : 16))
+              .attr('dy', d => (d.angle < 90 || d.angle >= 270 ? -16 : 24))
               .attr('dx', d => (d.angle >= 180 ? '-1em' : '1em'))
               // .attr('stroke', '#FFFFFF')
               .attr('fill', '#FFFFFF')
               .text(d => d.data.name);
-
+            enterG.attr('transform', d => `translate(${d.x},${d.y})`);
+            enterG
+              .attr('opacity', 0)
+              .transition(transition)
+              .delay(d => d.index * 250)
+              .attr('opacity', 1);
             return enterG;
           },
-          update => update
-        )
-        .transition(transition)
-        .attr('transform', d => `translate(${d.x},${d.y})`);
+          update =>
+            update
+              .transition(transition)
+              .attr('transform', d => `translate(${d.x},${d.y})`)
+        );
     }
-  }, [settingConfig, chartData, winSize]);
+  }, [settingConfig, chartData, winSize, id]);
 
   return (
     <DivContainer>
       <h1>MyChart</h1>
-      <div ref={refDiv}>
+      <div>
+        <div draggable={true} onDragStart={handleDragStart}>
+          Show me
+        </div>
+      </div>
+      <div
+        ref={refDiv}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDrop={handleDrop}
+      >
         <svg className="myChart">
           <defs>
             <linearGradient
@@ -631,6 +763,11 @@ export default function() {
           </defs>
         </svg>
       </div>
+      <DetailContainer hide={id === null} ref={detailRef}>
+        <WrapperIconButton onClick={() => setId(null)}>
+          <Close fontSize="large" color="secondary" />
+        </WrapperIconButton>
+      </DetailContainer>
     </DivContainer>
   );
 }
