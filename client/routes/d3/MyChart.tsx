@@ -145,6 +145,7 @@ class SpreadChart {
   public groupWidth: number;
   public groupHeight: number;
   private originData: any;
+  private context: CanvasRenderingContext2D;
 
   public constructor(config: IConfig, layout: ILayout) {
     this.layout = Object.assign({}, layout);
@@ -154,6 +155,8 @@ class SpreadChart {
 
   private init() {
     const layout = this.layout;
+    this.context = document.createElement('canvas').getContext('2d');
+    this.context.font = 'monospace 16px';
     this.groupWidth =
       (layout.width - layout.left - layout.right) / this.config.limit;
     this.groupHeight = this.config.height;
@@ -423,6 +426,12 @@ export default function() {
   }
 
   function dragging(d) {
+    // d3.selectAll('path.link')
+    //   .interrupt()
+    //   .attr('opacity', '1');
+    // d3.selectAll('g.child')
+    //   .interrupt()
+    //   .attr('opacity', '1');
     const x = d3.event.x;
     const y = d3.event.y;
     const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
@@ -532,8 +541,8 @@ export default function() {
 
       const drag = d3
         .drag()
-        .on('drag', dragging)
-        .on('end', dragend);
+        .on('drag', id === null ? dragging : null)
+        .on('end', id === null ? dragend : null);
 
       const transition = root
         .transition()
@@ -564,9 +573,12 @@ export default function() {
             return enterG;
           },
           update =>
-            update.transition(transition).attr('d', d => {
-              return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
-            })
+            update
+              .attr('stroke', '#F79A07')
+              .transition(transition)
+              .attr('d', d => {
+                return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
+              })
         );
       const nodeList = nodesContainer
         .selectAll('g.node')
@@ -723,6 +735,7 @@ export default function() {
           },
           update =>
             update
+              .attr('opacity', 1)
               .transition(transition)
               .attr('transform', d => `translate(${d.x},${d.y})`)
         );
