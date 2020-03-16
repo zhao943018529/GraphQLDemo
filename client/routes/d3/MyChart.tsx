@@ -7,7 +7,7 @@ import * as _ from 'lodash';
 const { useEffect, useState, useMemo, useRef } = React;
 
 const DivContainer = styled.div`
-  background: #f5f5f5;
+  background: #00111d;
   position: relative;
 `;
 
@@ -123,6 +123,7 @@ function stableSort(a, b) {
 
 interface ILayout {
   width: number;
+  height: number;
   left: number;
   top: number;
   right: number;
@@ -137,6 +138,7 @@ interface IConfig {
   limit: number;
   height: number;
   linkConfig: ILinkConfig;
+  font: string;
 }
 
 class SpreadChart {
@@ -154,16 +156,28 @@ class SpreadChart {
   }
 
   private init() {
-    const layout = this.layout;
+    this.initContext();
+    this.setFont(this.config.font);
+    this.configGroup();
+  }
+
+  private initContext() {
     this.context = document.createElement('canvas').getContext('2d');
-    this.context.font = 'monospace 16px';
+  }
+
+  private configGroup() {
     this.groupWidth =
-      (layout.width - layout.left - layout.right) / this.config.limit;
+      (this.layout.width - this.layout.left - this.layout.right) /
+      this.config.limit;
     this.groupHeight = this.config.height;
   }
 
-  public updateWidth(width: number) {
-    this.layout.width = width;
+  private setFont(fontStr: string) {
+    this.context.font = this.config.font;
+  }
+
+  public updateLayout(layout: ILayout) {
+    this.layout = Object.assign(this.layout, layout);
     this.init();
   }
 
@@ -175,21 +189,43 @@ class SpreadChart {
   }
 
   public getViewBox() {
-    if (!this.originData) {
-      throw Error('execute must after set data');
-    }
-
     return [
       -this.layout.left,
       -this.layout.top,
       this.layout.width,
-      Math.max(
-        this.groupHeight *
-          Math.ceil(this.originData.length / this.config.limit) +
-          this.layout.top,
-        600
-      )
+      this.layout.height
     ];
+  }
+
+  private normalizeY(y: number) {
+    return (Math.floor(y / this.groupHeight) + 0.5) * this.groupHeight;
+  }
+
+  public resort() {
+    return this.originData
+      .map(item => item._node_)
+      .sort((a, b) => {
+        const y1 = this.normalizeY(a.y);
+        const y2 = this.normalizeY(b.y);
+        if (y1 > y2) {
+          return 1;
+        } else if (y1 < y2) {
+          return -1;
+        } else {
+          if (a.x > b.x) {
+            return 1;
+          } else if (a.x < b.x) {
+            return -1;
+          } else {
+            return 0;
+          }
+        }
+      })
+      .map(item => item.data);
+  }
+
+  private mesureText(text: string): TextMetrics {
+    return this.context.measureText(text);
   }
 
   private buildNodes(dragData?: any) {
@@ -302,6 +338,7 @@ class SpreadChart {
             x: x,
             y: y,
             parent: node,
+            width: Math.ceil(this.mesureText(children[i].name).width),
             index: i
           });
 
@@ -312,23 +349,11 @@ class SpreadChart {
         return acc.concat(nodes2);
       }, []);
 
-    const links = nodes2.map(node => {
-      let current = null;
-      if (node._link_) {
-        current = node._link_;
-      } else {
-        current = {
-          id: _.uniqueId('link')
-        };
-      }
-      node._link_ = Object.assign(current, {
-        source: node,
-        target: node.parent,
-        index: node.index
-      });
-
-      return current;
-    });
+    const links = nodes2.map(node => ({
+      source: node,
+      target: node.parent,
+      index: node.index
+    }));
 
     this.nodes = nodes.concat(nodes2);
     this.links = links;
@@ -353,10 +378,10 @@ export default function() {
   const [chartData, setChartData] = useState(mockData);
   const [id, setId] = useState(null);
   const [winSize, setWinSize] = useState(-1);
-  const [isDragging, setIsDragging] = useState(false);
   const [dragData, setDragData] = useState(null);
   const refDiv = useRef<HTMLDivElement>(null);
   const groupRef = useRef(null);
+  const zoomRef = useRef(null);
   const [settingConfig, setSetttingConfig] = useState({
     treeHeight: 360,
     circle: 10,
@@ -368,6 +393,31 @@ export default function() {
       right: 120
     }
   });
+
+  function toggleDetail(id) {
+    if (id === null) {
+      zoomRef.current.transform(
+        groupRef.current,
+        d3.zoomIdentity.translate(0, 0).scale(1)
+      );
+      // groupRef.current.attr('transform', 'translate(0,0) scale(1)');
+    } else {
+      const rect = toolRef.current.getPositionByIndex(0);
+      const viewBox = toolRef.current.getViewBox();
+      const scale = 1.4;
+      const x = (viewBox[2] / 2 + viewBox[0] - rect.x) / scale;
+      const y = (viewBox[3] / 2 + viewBox[1] - rect.y) / scale;
+      // groupRef.current.attr(
+      //   'transform',
+      //   `translate(${x},${y}) scale(${scale})`
+      // );
+      zoomRef.current.transform(
+        groupRef.current,
+        d3.zoomIdentity.translate(x, y).scale(scale)
+      );
+    }
+    setId(id);
+  }
 
   function normalizeY(y) {
     return (
@@ -394,22 +444,24 @@ export default function() {
 
   function handleDrop(evt: React.DragEvent<HTMLElement>) {
     const dataStr = evt.dataTransfer.getData('Text');
-    const item = JSON.parse(dataStr);
-    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
-    const rect = evt.target.getBoundingClientRect();
-    const temp = {
-      x: evt.clientX - rect.left,
-      y: normalizeY(evt.clientY - rect.top),
-      data: item
-    };
-    topNodes.push(temp);
-    topNodes.sort(stableSort);
-    const newData = topNodes.map(item => item.data);
-    if (newData.length > 6) {
-      newData.pop();
+    if (dataStr) {
+      const item = JSON.parse(dataStr);
+      const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+      const rect = evt.target.getBoundingClientRect();
+      const temp = {
+        x: evt.clientX - rect.left,
+        y: normalizeY(evt.clientY - rect.top),
+        data: item
+      };
+      topNodes.push(temp);
+      topNodes.sort(stableSort);
+      const newData = topNodes.map(item => item.data);
+      if (newData.length > 6) {
+        newData.pop();
+      }
+      setChartData(newData);
+      evt.stopPropagation();
     }
-    setChartData(newData);
-    evt.stopPropagation();
     return false;
   }
 
@@ -432,12 +484,15 @@ export default function() {
     // d3.selectAll('g.child')
     //   .interrupt()
     //   .attr('opacity', '1');
+    const event = d3.event;
+    // event.sourceEvent.preventDefault();
+    // event.sourceEvent.stopPropagation();
     const x = d3.event.x;
     const y = d3.event.y;
     const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
     const target = _.find(topNodes, { id: d.id });
     target.x = x;
-    target.y = normalizeY(y);
+    target.y = y;
     topNodes.sort(stableSort);
     const newData = topNodes.map(node => node.data);
     // transformData(newData, treeWidth, settingConfig.treeHeight);
@@ -502,28 +557,38 @@ export default function() {
         nodesContainer = groupRef.current
           .append('g')
           .attr('class', 'nodes')
-          .attr('font-family', 'monospace')
+          .attr('font-family', 'Segoe UI')
           .attr('font-size', 16);
+        zoomRef.current = d3
+          .zoom()
+          .scaleExtent([0.6, 1.4])
+          .filter(function() {
+            return d3.event.ctrlKey;
+          })
+          .on('zoom', function(evt) {
+            const transform = d3.event.transform;
+            // const t = d3.zoomIdentity
+            //   .translate(transform.x, transform.y)
+            //   .scale(transform.k);
+            groupRef.current.attr(
+              'transform',
+              `translate(${transform.x},${transform.y}) scale(${transform.k})`
+            );
+          });
       } else {
         root = rootRef.current;
-        if (id !== null) {
-        }
         nodesContainer = root.select('g.nodes');
         linksContainer = root.select('g.links');
       }
       root.attr('viewBox', viewBox);
-      if (id !== null) {
-        const rect = toolRef.current.getPositionByIndex(0);
-        const scale = 1.4;
-        const x = (viewBox[2] / 2 + viewBox[0] - rect.x) / scale;
-        const y = (viewBox[3] / 2 + viewBox[1] - rect.y) / scale;
-        groupRef.current.attr(
-          'transform',
-          `translate(${x},${y}) scale(${scale})`
-        );
-      } else {
-        groupRef.current.attr('transform', 'translate(0,0) scale(1)');
-      }
+      // if (id !== null) {
+      //   const rect = toolRef.current.getPositionByIndex(0);
+      //   const scale = 1.4;
+      //   const x = (viewBox[2] / 2 + viewBox[0] - rect.x) / scale;
+      //   const y = (viewBox[3] / 2 + viewBox[1] - rect.y) / scale;
+      // } else {
+      //   groupRef.current.attr('transform', 'translate(0,0) scale(1)');
+      // }
       //   if (!isDragging) {
       //     transformData(chartData, treeWidth, settingConfig.treeHeight);
       //   }
@@ -544,6 +609,7 @@ export default function() {
         .on('drag', id === null ? dragging : null)
         .on('end', id === null ? dragend : null);
 
+      root.call(zoomRef.current);
       const transition = root
         .transition()
         .duration(250)
@@ -552,33 +618,74 @@ export default function() {
       rootRef.current = root;
       linksContainer
         .selectAll('path.link')
-        .data(links, d => d.id)
+        .data(links, d => `${d.source.id}-${d.target.id}`)
         .join(
           enter => {
             const enterG = enter
               .append('path')
               .attr('class', 'link')
-              .attr('fill', 'none')
-              .attr('stroke', 'transparent')
+              .attr('marker-end', 'url(#assets-arrow)')
+              .attr('stroke', '#F79A07');
+            enterG
+              .transition(transition)
+              .delay(d => d.index * 250)
               .attr(
                 'd',
                 d =>
                   `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y} `
               );
+
+            return enterG;
+          },
+          update =>
+            update.transition(transition).attr('d', d => {
+              return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
+            }),
+          exit => exit.remove()
+        );
+      linksContainer
+        .selectAll('text')
+        .data(links, d => `${d.source.id}-${d.target.id}`)
+        .join(
+          enter => {
+            const enterG = enter
+              .append('text')
+              .attr(
+                'transform',
+                d =>
+                  `translate(${(d.source.x + d.target.x) / 2},${(d.source.y +
+                    d.target.y) /
+                    2}) rotate(${
+                    d.source.angle > 180
+                      ? d.source.angle - 270
+                      : d.source.angle - 90
+                  }) translate(${-27},0)`
+              )
+              .attr('stroke', '#BFBFBF');
+
             enterG
               .transition(transition)
               .delay(d => d.index * 250)
-              .attr('stroke', '#F79A07');
+              .text('11:06:34');
 
             return enterG;
           },
           update =>
             update
-              .attr('stroke', '#F79A07')
+              .text('11:06:34')
               .transition(transition)
-              .attr('d', d => {
-                return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
-              })
+              .attr(
+                'transform',
+                d =>
+                  `translate(${(d.source.x + d.target.x) / 2},${(d.source.y +
+                    d.target.y) /
+                    2}) rotate(${
+                    d.source.angle > 180
+                      ? d.source.angle - 270
+                      : d.source.angle - 90
+                  }) translate(${-27},0)`
+              ),
+          exit => exit.remove()
         );
       const nodeList = nodesContainer
         .selectAll('g.node')
@@ -593,20 +700,20 @@ export default function() {
               .append('g')
               .attr('class', 'node')
               .attr('transform', 'translate(0,0)');
-            enterG
-              .append('circle')
-              .attr('cx', 0)
-              .attr('cy', 0)
-              .attr('r', 18)
-              .attr('fill', d => d.data.color);
+            // enterG
+            //   .append('circle')
+            //   .attr('cx', 0)
+            //   .attr('cy', 0)
+            //   .attr('r', 18)
+            //   .attr('fill', d => d.data.color);
             enterG
               .append('use')
               .attr('x', -15)
               .attr('y', -15)
-              .attr('width', 24)
-              .attr('height', 24)
-              .attr('href', '#Combined-Shape')
-              .attr('fill', '#FFFFFF');
+              .attr('width', 30)
+              .attr('height', 30)
+              .attr('href', '#assets-server')
+              .attr('fill', d => d.data.color);
 
             return enterG;
           },
@@ -617,7 +724,7 @@ export default function() {
         )
         .call(drag)
         .on('dblclick', d => {
-          setId(d.data.id);
+          toggleDetail(d.data.id);
         })
         .transition(transition)
         .attr('transform', d => `translate(${d.x},${d.y})`);
@@ -636,9 +743,9 @@ export default function() {
               .attr('fill', 'none')
               .attr('stroke', '#F79A07')
               .attr('points', d => {
-                const width = 16 * (d.data.name.length + 1);
                 const height = 40;
                 const skewWidth = 10;
+                const width = d.width + (8 + 4) * 2;
                 if (d.angle < 90) {
                   return `0,0 0,${-height +
                     skewWidth} ${skewWidth},${-height} ${width},${-height} ${width},${-skewWidth} ${width -
@@ -656,13 +763,6 @@ export default function() {
                     skewWidth} ${-skewWidth},${-height} ${-width},${-height} ${-width},${-skewWidth} ${-width +
                     skewWidth},0`;
                 }
-                // if (d.direct === 'right') {
-                //   return `0,-10 10,-20 ${width},-20 ${width},10 ${width -
-                //     10},20 0,20`;
-                // } else {
-                //   return `0,-10 -10,-20 ${-width},-20 ${-width},10 ${-width +
-                //     10},20 0,20`;
-                // }
               });
             enterG
               .append('polygon')
@@ -672,7 +772,7 @@ export default function() {
                 const height = 32;
                 const fontSize = 16;
                 const skewWidth = height / 4;
-                const width = fontSize * (d.data.name.length + 1) - space * 2;
+                const width = d.width + 8 * 2;
                 if (d.angle < 90) {
                   return `${space},${-space} ${space},${-height -
                     space +
@@ -702,26 +802,12 @@ export default function() {
                     space},${-height - space} ${-width - space},${-skewWidth -
                     space} ${-width + skewWidth - space},${-space}`;
                 }
-                // if (d.direct === 'right') {
-                //   return `${space},${-skewWidth} ${space +
-                //     skewWidth},${-height / 2} ${width + space},${-height /
-                //     2} ${width + space},${skewWidth} ${width +
-                //     space -
-                //     skewWidth},${height / 2} ${space},${height / 2}`;
-                // } else {
-                //   return `${-space},${-skewWidth} ${-space -
-                //     skewWidth},${-height / 2} ${-space - width},${-height /
-                //     2} ${-width - space},${skewWidth} ${-space -
-                //     width +
-                //     skewWidth},${height / 2} ${-space},${height /
-                //     2} ${-space},${-skewWidth}`;
-                // }
               });
             enterG
               .append('text')
               .attr('text-anchor', d => (d.angle >= 180 ? 'end' : 'start'))
               .attr('dy', d => (d.angle < 90 || d.angle >= 270 ? -16 : 24))
-              .attr('dx', d => (d.angle >= 180 ? '-1em' : '1em'))
+              .attr('dx', d => (d.angle >= 180 ? '-12' : '12'))
               // .attr('stroke', '#FFFFFF')
               .attr('fill', '#FFFFFF')
               .text(d => d.data.name);
@@ -773,11 +859,29 @@ export default function() {
               fillRule="nonzero"
               d="M12,24 L12,22 L3,22 C1.8954305,22 1,21.1045695 1,20 L1,5 C1,3.8954305 1.8954305,3 3,3 L27,3 C28.1045695,3 29,3.8954305 29,5 L29,20 C29,21.1045695 28.1045695,22 27,22 L18,22 L18,24 L22,24 C22.5522847,24 23,24.4477153 23,25 C23,25.5522847 22.5522847,26 22,26 L8,26 C7.44771525,26 7,25.5522847 7,25 C7,24.4477153 7.44771525,24 8,24 L12,24 Z M3,6 L3,19 C3,19.5522847 3.44771525,20 4,20 L26,20 C26.5522847,20 27,19.5522847 27,19 L27,6 C27,5.44771525 26.5522847,5 26,5 L4,5 C3.44771525,5 3,5.44771525 3,6 Z M11,9 L20,9 L20,11 L11,11 L11,9 Z M6,9 L9,9 L9,11 L6,11 L6,9 Z M6,14 L9,14 L9,16 L6,16 L6,14 Z M11,14 L24,14 L24,16 L11,16 L11,14 Z"
             ></path>
+            <symbol id="assets-server" viewBox="0 0 30 30">
+              <circle cx="15" cy="15" r="15"></circle>
+              <path
+                d="M9,5 L21,5 C21.5522847,5 22,5.44771525 22,6 L22,24 C22,24.5522847 21.5522847,25 21,25 L9,25 C8.44771525,25 8,24.5522847 8,24 L8,6 C8,5.44771525 8.44771525,5 9,5 Z M10,7 L10,9 L20,9 L20,7 L10,7 Z M10,10 L10,11 L20,11 L20,10 L10,10 Z M10,12 L10,13 L20,13 L20,12 L10,12 Z M15,22.97702 C15.8284271,22.97702 16.5,22.3054472 16.5,21.47702 C16.5,20.6485929 15.8284271,19.97702 15,19.97702 C14.1715729,19.97702 13.5,20.6485929 13.5,21.47702 C13.5,22.3054472 14.1715729,22.97702 15,22.97702 Z M15,17 C15.2761424,17 15.5,16.7761424 15.5,16.5 C15.5,16.2238576 15.2761424,16 15,16 C14.7238576,16 14.5,16.2238576 14.5,16.5 C14.5,16.7761424 14.7238576,17 15,17 Z M15,19 C15.2761424,19 15.5,18.7761424 15.5,18.5 C15.5,18.2238576 15.2761424,18 15,18 C14.7238576,18 14.5,18.2238576 14.5,18.5 C14.5,18.7761424 14.7238576,19 15,19 Z"
+                fill="#FFFFFF"
+              ></path>
+            </symbol>
+            <marker
+              id="assets-arrow"
+              markerHeight="10"
+              markerWidth="10"
+              refX="25"
+              refY="-0.5"
+              orient="auto"
+              viewBox="0 -5 10 10"
+            >
+              <path d="M0,-5L10,0L0,5" fill="#F79A07"></path>
+            </marker>
           </defs>
         </svg>
       </div>
       <DetailContainer hide={id === null} ref={detailRef}>
-        <WrapperIconButton onClick={() => setId(null)}>
+        <WrapperIconButton onClick={() => toggleDetail(null)}>
           <Close fontSize="large" color="secondary" />
         </WrapperIconButton>
       </DetailContainer>
