@@ -201,7 +201,22 @@ class SpreadChart {
     return (Math.floor(y / this.groupHeight) + 0.5) * this.groupHeight;
   }
 
-  public resort() {
+  public addNode(item: any, x: number, y: number): any[] {
+    const node = {
+      id: item.id,
+      level: 0,
+      data: item,
+      x: x,
+      y: y,
+      index: this.originData.length
+    };
+    item._node_ = node;
+    this.originData.push(item);
+
+    return this.resort();
+  }
+
+  public resort(): any[] {
     return this.originData
       .map(item => item._node_)
       .sort((a, b) => {
@@ -228,7 +243,11 @@ class SpreadChart {
     return this.context.measureText(text);
   }
 
-  private buildNodes(dragData?: any) {
+  public build(dragData?: IDragData) {
+    if (dragData !== null && dragData !== undefined) {
+      this.originData = this.resort();
+    }
+
     const nodes = this.originData.map((item, i) => {
       let current = null;
       if (item._node_) {
@@ -250,7 +269,7 @@ class SpreadChart {
       return current;
     });
     if (dragData) {
-      const found = _.find(nodes, item => item.id === dragData.target.id);
+      const found = _.find(nodes, item => item.id === dragData.id);
       if (found) {
         found.x = dragData.touch.x;
         found.y = dragData.touch.y;
@@ -304,32 +323,13 @@ class SpreadChart {
               id: _.uniqueId('node')
             };
           }
-          // let y: number;
-          // if (angle <= 90) {
-          //   y = node.y - Math.tan(((90 - angle) * Math.PI) / 180) * l2;
-          // } else if (angle <= 180) {
-          //   y = node.y + Math.tan(((angle - 90) * Math.PI) / 180) * l2;
-          // } else if (angle <= 270) {
-          //   y = node.y + Math.tan(((270 - angle) * Math.PI) / 180) * l2;
-          // } else {
-          //   y = node.y - Math.tan(((angle - 270) * Math.PI) / 180) * l2;
-          // }
+
           const x = Math.floor(
             node.x + Math.sin((angle * Math.PI) / 180) * linkWidth
           );
           const y = Math.floor(
             node.y - Math.cos((angle * Math.PI) / 180) * linkWidth
           );
-          // if (angle % 180 <= 90) {
-          //   );
-          // } else {
-          //   y = Math.floor(
-          //     node.y + Math.sin((angle * Math.PI) / 180) * linkWidth
-          //   );
-          //   x = Math.floor(
-          //     node.x - Math.cos((angle * Math.PI) / 180) * linkWidth
-          //   );
-          // }
 
           item._node_ = Object.assign(current, {
             data: children[i],
@@ -361,11 +361,19 @@ class SpreadChart {
     return [this.nodes, this.links];
   }
 
-  public build(data: any, dragData: any) {
+  public setData(data: any) {
     this.originData = data;
-
-    return this.buildNodes(dragData);
   }
+}
+
+interface ITouch {
+  x: number;
+  y: number;
+}
+
+interface IDragData {
+  id: string;
+  touch: ITouch;
 }
 
 // mockData.forEach((a, i) => (a.rank = i));
@@ -378,7 +386,7 @@ export default function() {
   const [chartData, setChartData] = useState(mockData);
   const [id, setId] = useState(null);
   const [winSize, setWinSize] = useState(-1);
-  const [dragData, setDragData] = useState(null);
+  const [dragData, setDragData] = useState<IDragData>(null);
   const refDiv = useRef<HTMLDivElement>(null);
   const groupRef = useRef(null);
   const zoomRef = useRef(null);
@@ -446,20 +454,16 @@ export default function() {
     const dataStr = evt.dataTransfer.getData('Text');
     if (dataStr) {
       const item = JSON.parse(dataStr);
-      const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
       const rect = evt.target.getBoundingClientRect();
-      const temp = {
-        x: evt.clientX - rect.left,
-        y: normalizeY(evt.clientY - rect.top),
-        data: item
-      };
-      topNodes.push(temp);
-      topNodes.sort(stableSort);
-      const newData = topNodes.map(item => item.data);
-      if (newData.length > 6) {
-        newData.pop();
+      const newChartData = toolRef.current.addNode(
+        item,
+        evt.clientX - rect.left,
+        evt.clientY - rect.top
+      );
+      if (newChartData.length > 6) {
+        newChartData.pop();
       }
-      setChartData(newData);
+      setChartData(newChartData);
       evt.stopPropagation();
     }
     return false;
@@ -484,36 +488,39 @@ export default function() {
     // d3.selectAll('g.child')
     //   .interrupt()
     //   .attr('opacity', '1');
-    const event = d3.event;
-    // event.sourceEvent.preventDefault();
-    // event.sourceEvent.stopPropagation();
-    const x = d3.event.x;
-    const y = d3.event.y;
-    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
-    const target = _.find(topNodes, { id: d.id });
-    target.x = x;
-    target.y = y;
-    topNodes.sort(stableSort);
-    const newData = topNodes.map(node => node.data);
+    // const event = d3.event;
+    // // event.sourceEvent.preventDefault();
+    // // event.sourceEvent.stopPropagation();
+    // const x = d3.event.x;
+    // const y = d3.event.y;
+    setDragData({
+      id: d.data.id,
+      touch: {
+        x: d3.event.x,
+        y: d3.event.y
+      }
+    });
+    // const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
+    // const target = _.find(topNodes, { id: d.id });
+    // target.x = x;
+    // target.y = y;
+    // topNodes.sort(stableSort);
+    // const newData = topNodes.map(node => node.data);
     // transformData(newData, treeWidth, settingConfig.treeHeight);
     // target.y = y;
     // target.x = x;
     // setIsDragging(true);
-    setChartData(newData);
-    setDragData({ target: d, touch: { x, y } });
+    // setChartData(newData);
+    // setDragData({ target: d, touch: { x, y } });
   }
 
   function dragend(d) {
     const x = d3.event.x;
     const y = d3.event.y;
-    const topNodes = toolRef.current.nodes.filter(node => node.level === 0);
-    const target = _.find(topNodes, { id: d.id });
-    target.x = x;
-    target.y = normalizeY(y);
-    topNodes.sort(stableSort);
-    const newData = topNodes.map(node => node.data);
+    d.x = x;
+    d.y = y;
+    setChartData(toolRef.current.resort());
     setDragData(null);
-    setChartData(newData);
   }
 
   useEffect(() => {
@@ -530,12 +537,14 @@ export default function() {
           {
             limit: 3,
             height: 400,
+            font: '16px "Segoe UI"',
             linkConfig: {
               width: 140
             }
           },
           {
             width: winSize,
+            height: 900,
             left: 40,
             top: 100,
             right: 40
@@ -548,7 +557,9 @@ export default function() {
       } else {
         renderData = chartData;
       }
-      const [nodes, links] = toolRef.current.build(renderData, dragData);
+      toolRef.current.setData(renderData);
+      const [nodes, links] = toolRef.current.build();
+
       const viewBox = toolRef.current.getViewBox();
       if (rootRef.current == null) {
         root = d3.select('svg.myChart');
@@ -644,12 +655,13 @@ export default function() {
           exit => exit.remove()
         );
       linksContainer
-        .selectAll('text')
+        .selectAll('text.time')
         .data(links, d => `${d.source.id}-${d.target.id}`)
         .join(
           enter => {
             const enterG = enter
               .append('text')
+              .attr('class', 'time')
               .attr(
                 'transform',
                 d =>
@@ -827,6 +839,53 @@ export default function() {
         );
     }
   }, [settingConfig, chartData, winSize, id]);
+
+  useEffect(() => {
+    if (dragData !== null) {
+      toolRef.current.build(dragData);
+      const transition = rootRef.current
+        .transition()
+        .duration(250)
+        .ease(d3.easeLinear);
+      const linkContainer = groupRef.current.select('g.links');
+      // 更新link位置
+      linkContainer
+        .selectAll('path.link')
+        .transition(transition)
+        .attr('d', d => {
+          return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
+        });
+
+      // 更新link文本位置
+      linkContainer
+        .selectAll('text.time')
+        .text('11:06:34')
+        .transition(transition)
+        .attr(
+          'transform',
+          d =>
+            `translate(${(d.source.x + d.target.x) / 2},${(d.source.y +
+              d.target.y) /
+              2}) rotate(${
+              d.source.angle > 180 ? d.source.angle - 270 : d.source.angle - 90
+            }) translate(${-27},0)`
+        );
+
+      // 更新主机结点
+      const nodeContainer = groupRef.current.select('g.nodes');
+      nodeContainer
+        .selectAll('g.node')
+        .transition(transition)
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+
+      // 更新叶子结点
+      nodeContainer
+        .selectAll('g.child')
+        .attr('opacity', 1)
+        .transition(transition)
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    }
+  }, [dragData]);
 
   return (
     <DivContainer>
