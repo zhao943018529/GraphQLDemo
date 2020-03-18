@@ -93,10 +93,24 @@ const mockData = [
 
 function generateData() {
   const size = Math.floor(4 + Math.random() * 7);
-  const children = _.range(size).map(() => ({
-    id: _.uniqueId('aaaa'),
-    name: _.uniqueId('bbbbbb')
-  }));
+  const children = _.range(size).map(() => {
+    const type = Math.floor(Math.random() * 1000) % 2 == 0 ? 0 : 1;
+    let name;
+    if (type === 1) {
+      name = _.range(3)
+        .map(() => Math.floor(Math.random() * 256))
+        .join('.');
+    } else {
+      name = _.uniqueId('bbbbbb');
+    }
+
+    return {
+      id: _.uniqueId('aaaa'),
+      name: name,
+      type: type
+    };
+  });
+
   return {
     id: _.uniqueId('toptop'),
     name: _.uniqueId('jqka'),
@@ -376,6 +390,74 @@ interface IDragData {
   touch: ITouch;
 }
 
+function regularWrapper(width: number, height: number, edge: number) {
+  return `M0,0 L0,${edge} M${0},${height -
+    edge} L0,${height} L${edge},${height} M${width -
+    edge},${height} L${width},${height} L${width},${height -
+    edge} M${width},${edge} L${width},0 L${width - edge},0 M${edge},0 L0,0`;
+}
+
+function getPosition(d: any) {
+  let width: number;
+  let height: number;
+  if (d.data.type === 1) {
+    width = d.width + 6 * 2;
+
+    height = 24;
+  } else {
+    width = d.width + (8 + 4) * 2;
+    height = 40;
+  }
+  let x: number;
+  let y: number;
+  if (d.angle < 90) {
+    x = d.x;
+    y = d.y - height;
+  } else if (d.angle < 180) {
+    x = d.x;
+    y = d.y;
+  } else if (d.angle < 270) {
+    x = d.x - width;
+    y = d.y;
+  } else {
+    x = d.x - width;
+    y = d.y - height;
+  }
+
+  return [x, y];
+}
+
+function generatePath(
+  d: any,
+  height: number,
+  skewWidth: number,
+  edge: number,
+  delta?: { x: number; y: number }
+) {
+  const width = d.width + edge * 2;
+  const x = (delta && delta.x) || 0;
+  const y = (delta && delta.y) || 0;
+  if (d.angle < 90) {
+    return `M${x + skewWidth},${y} L${x + width},${y} L${x + width},${y +
+      height -
+      skewWidth} L${x + width - skewWidth},${y + height} L${x},${y +
+      height} L${x},${y + skewWidth} z`;
+  } else if (d.angle < 180) {
+    return `M${x},${y} L${x + width - skewWidth},${y} L${x + width},${y +
+      skewWidth} L${x + width},${y + height} L${x + skewWidth},${y +
+      height} L${x},${y + height - skewWidth} z`;
+  } else if (d.angle < 270) {
+    return `M${x + skewWidth},${y} L${x + width},${y} L${x + width},${y +
+      height -
+      skewWidth} L${x + width - skewWidth},${y + height} L${x},${y +
+      height} L${x},${y + skewWidth} z`;
+  } else {
+    return `M${x},${y} L${x + width - skewWidth},${y} L${x + width},${y +
+      skewWidth} L${x + width},${y + height} L${x + skewWidth},${y +
+      height} L${x},${y + height - skewWidth} z`;
+  }
+}
+
 // mockData.forEach((a, i) => (a.rank = i));
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 // eslint-disable-next-line react/display-name
@@ -388,6 +470,7 @@ export default function() {
   const [winSize, setWinSize] = useState(-1);
   const [dragData, setDragData] = useState<IDragData>(null);
   const refDiv = useRef<HTMLDivElement>(null);
+  const refSvg = useRef<SVGSVGElement>(null);
   const groupRef = useRef(null);
   const zoomRef = useRef(null);
   const [settingConfig, setSetttingConfig] = useState({
@@ -401,6 +484,8 @@ export default function() {
       right: 120
     }
   });
+
+  const delay = 150;
 
   function toggleDetail(id) {
     if (id === null) {
@@ -419,10 +504,12 @@ export default function() {
       //   'transform',
       //   `translate(${x},${y}) scale(${scale})`
       // );
-      zoomRef.current.transform(
-        groupRef.current,
-        d3.zoomIdentity.translate(x, y).scale(scale)
-      );
+      setTimeout(() => {
+        zoomRef.current.transform(
+          groupRef.current,
+          d3.zoomIdentity.translate(x, y).scale(scale)
+        );
+      }, 0);
     }
     setId(id);
   }
@@ -469,16 +556,10 @@ export default function() {
     return false;
   }
 
-  function transformData(data, width: number, height: number) {
-    // 转换每个节点对应坐标 每行显示三个
-    data.forEach((item, i) => {
-      const x = (i % 3) * width + 0.5 * width;
-      const y = Math.floor((i / 3) * height + 0.5 * height);
-      item.x = x;
-      item.y = y;
-    });
-
-    return data;
+  function dragStart() {
+    const event = d3.event.sourceEvent;
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   function dragging(d) {
@@ -560,9 +641,8 @@ export default function() {
       toolRef.current.setData(renderData);
       const [nodes, links] = toolRef.current.build();
 
-      const viewBox = toolRef.current.getViewBox();
       if (rootRef.current == null) {
-        root = d3.select('svg.myChart');
+        root = d3.select(refSvg.current);
         groupRef.current = root.append('g').attr('class', 'group');
         linksContainer = groupRef.current.append('g').attr('class', 'links');
         nodesContainer = groupRef.current
@@ -573,9 +653,10 @@ export default function() {
         zoomRef.current = d3
           .zoom()
           .scaleExtent([0.6, 1.4])
-          .filter(function() {
-            return d3.event.ctrlKey;
-          })
+          // .filter(function() {
+          //   debugger;
+          //   return d3.event.ctrlKey;
+          // })
           .on('zoom', function(evt) {
             const transform = d3.event.transform;
             // const t = d3.zoomIdentity
@@ -586,44 +667,23 @@ export default function() {
               `translate(${transform.x},${transform.y}) scale(${transform.k})`
             );
           });
+        root.attr('viewBox', toolRef.current.getViewBox());
       } else {
         root = rootRef.current;
         nodesContainer = root.select('g.nodes');
         linksContainer = root.select('g.links');
       }
-      root.attr('viewBox', viewBox);
-      // if (id !== null) {
-      //   const rect = toolRef.current.getPositionByIndex(0);
-      //   const scale = 1.4;
-      //   const x = (viewBox[2] / 2 + viewBox[0] - rect.x) / scale;
-      //   const y = (viewBox[3] / 2 + viewBox[1] - rect.y) / scale;
-      // } else {
-      //   groupRef.current.attr('transform', 'translate(0,0) scale(1)');
-      // }
-      //   if (!isDragging) {
-      //     transformData(chartData, treeWidth, settingConfig.treeHeight);
-      //   }
-
-      //   function normalizeX(x) {
-      //     return (Math.floor(x / treeWidth) + 0.5) * treeWidth;
-      //   }
-
-      //   function normalizeY(y) {
-      //     return (
-      //       (Math.floor(y / settingConfig.treeHeight) + 0.5) *
-      //       settingConfig.treeHeight
-      //     );
-      //   }
 
       const drag = d3
         .drag()
+        // .on('start', id === null ? dragStart : null)
         .on('drag', id === null ? dragging : null)
         .on('end', id === null ? dragend : null);
 
       root.call(zoomRef.current);
       const transition = root
         .transition()
-        .duration(250)
+        .duration(delay)
         .ease(d3.easeLinear);
 
       rootRef.current = root;
@@ -639,7 +699,7 @@ export default function() {
               .attr('stroke', '#F79A07');
             enterG
               .transition(transition)
-              .delay(d => d.index * 250)
+              .delay(d => d.index * delay)
               .attr(
                 'd',
                 d =>
@@ -677,7 +737,7 @@ export default function() {
 
             enterG
               .transition(transition)
-              .delay(d => d.index * 250)
+              .delay(d => d.index * delay)
               .text('11:06:34');
 
             return enterG;
@@ -750,84 +810,46 @@ export default function() {
         .join(
           enter => {
             const enterG = enter.append('g').attr('class', 'child');
-            enterG
-              .append('polygon')
+            const largeEnter = enterG.filter(d => d.data.type !== 1);
+            largeEnter
+              .append('path')
               .attr('fill', 'none')
               .attr('stroke', '#F79A07')
-              .attr('points', d => {
-                const height = 40;
-                const skewWidth = 10;
-                const width = d.width + (8 + 4) * 2;
-                if (d.angle < 90) {
-                  return `0,0 0,${-height +
-                    skewWidth} ${skewWidth},${-height} ${width},${-height} ${width},${-skewWidth} ${width -
-                    skewWidth},0`;
-                } else if (d.angle < 180) {
-                  return `0,0 ${width -
-                    skewWidth},0 ${width},${skewWidth} ${width},${height} ${skewWidth},${height} 0,${height -
-                    skewWidth}`;
-                } else if (d.angle < 270) {
-                  return `0,0 ${-width +
-                    skewWidth},0 ${-width},${skewWidth} ${-width},${height} ${-skewWidth},${height} 0,${height -
-                    skewWidth}`;
-                } else {
-                  return `0,0 0,${-height +
-                    skewWidth} ${-skewWidth},${-height} ${-width},${-height} ${-width},${-skewWidth} ${-width +
-                    skewWidth},0`;
-                }
-              });
-            enterG
-              .append('polygon')
+              .attr('d', d => generatePath(d, 40, 10, 12));
+            largeEnter
+              .append('path')
               .attr('fill', '#6b460d')
-              .attr('points', d => {
-                const space = 4;
-                const height = 32;
-                const fontSize = 16;
-                const skewWidth = height / 4;
-                const width = d.width + 8 * 2;
-                if (d.angle < 90) {
-                  return `${space},${-space} ${space},${-height -
-                    space +
-                    skewWidth} ${skewWidth + space},${-height - space} ${width +
-                    space},${-height - space} ${width + space},${-skewWidth -
-                    space} ${width - skewWidth + space},${-space} `;
-                } else if (d.angle < 180) {
-                  return `${space},${space} ${width -
-                    skewWidth +
-                    space},${space} ${width + space},${skewWidth +
-                    space} ${width + space},${height + space} ${skewWidth +
-                    space},${height + space} ${space},${height -
-                    skewWidth +
-                    space}`;
-                } else if (d.angle < 270) {
-                  return `${-space},${space} ${-space},${height +
-                    space -
-                    skewWidth} ${-skewWidth - space},${height +
-                    space} ${-space - width},${height + space} ${-width -
-                    space},${skewWidth + space} ${-width -
-                    space +
-                    skewWidth},${space}`;
-                } else {
-                  return `${-space},${-space} ${-space},${-height +
-                    skewWidth -
-                    space} ${-skewWidth - space},${-height - space} ${-width -
-                    space},${-height - space} ${-width - space},${-skewWidth -
-                    space} ${-width + skewWidth - space},${-space}`;
-                }
-              });
+              .attr('d', d => generatePath(d, 32, 8, 8, { x: 4, y: 4 }));
+            const smallG = enterG.filter(d => d.data.type === 1);
+            smallG
+              .append('rect')
+              .attr('fill', 'rgba(0,71,108,0.41)')
+              .attr('width', d => d.width + 6 * 2)
+              .attr('height', 24);
+            // '#3BA1FF'
+            smallG
+              .append('path')
+              .attr('stroke', '#3BA1FF')
+              .attr('fill', 'none')
+              .attr('d', d => regularWrapper(d.width + 6 * 2, 24, 6));
             enterG
               .append('text')
-              .attr('text-anchor', d => (d.angle >= 180 ? 'end' : 'start'))
-              .attr('dy', d => (d.angle < 90 || d.angle >= 270 ? -16 : 24))
-              .attr('dx', d => (d.angle >= 180 ? '-12' : '12'))
+              // .attr('text-anchor', d => (d.angle >= 180 ? 'end' : 'start'))
+              .attr('dy', d => (d.data.type !== 1 ? 20 : 16))
+              .attr('dx', d => (d.data.type !== 1 ? 12 : 6))
               // .attr('stroke', '#FFFFFF')
               .attr('fill', '#FFFFFF')
               .text(d => d.data.name);
-            enterG.attr('transform', d => `translate(${d.x},${d.y})`);
+            enterG.attr('transform', d => {
+              const position = getPosition(d);
+
+              return `translate(${position[0]},${position[1]})`;
+            });
+
             enterG
               .attr('opacity', 0)
               .transition(transition)
-              .delay(d => d.index * 250)
+              .delay(d => d.index * delay)
               .attr('opacity', 1);
             return enterG;
           },
@@ -835,7 +857,11 @@ export default function() {
             update
               .attr('opacity', 1)
               .transition(transition)
-              .attr('transform', d => `translate(${d.x},${d.y})`)
+              .attr('transform', d => {
+                const position = getPosition(d);
+
+                return `translate(${position[0]},${position[1]})`;
+              })
         );
     }
   }, [settingConfig, chartData, winSize, id]);
@@ -845,7 +871,7 @@ export default function() {
       toolRef.current.build(dragData);
       const transition = rootRef.current
         .transition()
-        .duration(250)
+        .duration(delay)
         .ease(d3.easeLinear);
       const linkContainer = groupRef.current.select('g.links');
       // 更新link位置
@@ -883,7 +909,11 @@ export default function() {
         .selectAll('g.child')
         .attr('opacity', 1)
         .transition(transition)
-        .attr('transform', d => `translate(${d.x},${d.y})`);
+        .attr('transform', d => {
+          const position = getPosition(d);
+
+          return `translate(${position[0]},${position[1]})`;
+        });
     }
   }, [dragData]);
 
@@ -901,7 +931,11 @@ export default function() {
         onDragEnter={handleDragEnter}
         onDrop={handleDrop}
       >
-        <svg className="myChart">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="myChart"
+          ref={refSvg}
+        >
           <defs>
             <linearGradient
               x1="50%"
@@ -934,7 +968,7 @@ export default function() {
               orient="auto"
               viewBox="0 -5 10 10"
             >
-              <path d="M0,-5L10,0L0,5" fill="#F79A07"></path>
+              <path d="M0,-5L10,0L0,5" fill="context-stroke"></path>
             </marker>
           </defs>
         </svg>
